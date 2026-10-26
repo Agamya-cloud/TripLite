@@ -1,11 +1,10 @@
 import { defineConfig } from "vite";
 import path from "node:path";
 
-// Server build configuration
 export default defineConfig({
   build: {
     lib: {
-      entry: path.resolve(__dirname, "server/node-build.ts"),
+      entry: path.resolve(__dirname, "backend/node-build.ts"),
       name: "server",
       fileName: "production",
       formats: ["es"],
@@ -15,39 +14,17 @@ export default defineConfig({
     ssr: true,
     rollupOptions: {
       external: [
-        // Node.js built-ins
-        "fs",
-        "path",
-        "url",
-        "http",
-        "https",
-        "os",
-        "crypto",
-        "stream",
-        "util",
-        "events",
-        "buffer",
-        "querystring",
-        "child_process",
-        // External dependencies that should not be bundled
-        "express",
-        "cors",
+        "fs", "path", "url", "http", "https", "os", "crypto", "stream",
+        "util", "events", "buffer", "querystring", "child_process",
+        "express", "cors",
       ],
-      output: {
-        format: "es",
-        entryFileNames: "[name].mjs",
-      },
+      output: { format: "es", entryFileNames: "[name].mjs" },
     },
-    minify: false, // Keep readable for debugging
+    minify: false,
     sourcemap: true,
   },
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./client"),
-      "@shared": path.resolve(__dirname, "./shared"),
-    },
+    alias: { "@": path.resolve(__dirname, "./frontend") },
   },
-  define: {
-    "process.env.NODE_ENV": '"production"',
-  },
+  define: { "process.env.NODE_ENV": '"production"' },
 });
