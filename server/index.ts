@@ -67,7 +67,8 @@ export function createServer() {
   };
 
   app.get("/api/ping", (_req, res) => {
-    res.json({ message: "ping" });
+    const ping = process.env.PING_MESSAGE ?? "ping";
+    res.json({ message: ping });
   });
   app.use("/api/auth", requireDatabase, authRoutes);
   app.use("/api/trips", requireDatabase, requireAuth, tripRoutes);
