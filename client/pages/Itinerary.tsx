@@ -316,7 +316,7 @@ function buildDays(
         ];
       return {
         ...activity,
-        id: `${destination}-${style}-${interests}-${budget}-${variation}-${dayIndex}-${slotIndex}`,
+        id: `${dayIndex}-${slotIndex}`,
         slot,
       };
     }),
@@ -405,7 +405,10 @@ export default function Itinerary() {
         ),
       };
       if (editingPlanId) {
-        await api("/api/itineraries", json("PATCH", { id: editingPlanId, ...payload }));
+        await api(
+          "/api/itineraries",
+          json("PATCH", { id: editingPlanId, ...payload }),
+        );
       } else {
         await api("/api/itineraries", json("POST", payload));
       }
@@ -422,23 +425,33 @@ export default function Itinerary() {
   const loadPlan = (item: RecordData) => {
     setDestination(String(item.destination ?? ""));
     setDays(Math.min(14, Math.max(1, Number(item.days) || 1)));
-    setStyle((styles.includes(item.style) ? item.style : "Mixed") as TravelStyle);
+    setStyle(
+      (styles.includes(item.style) ? item.style : "Mixed") as TravelStyle,
+    );
     setBudget(String(item.budgetComfort ?? "Balanced"));
     setStartTime(String(item.startTime ?? "8:30 AM"));
     setInterests(String(item.interests ?? ""));
     setSelectedTripId(String(item.tripId ?? ""));
     setEditingPlanId(idOf(item));
-    setEditingPlanTitle(String(item.title ?? item.name ?? `${item.destination} · ${item.days} days`));
+    setEditingPlanTitle(
+      String(
+        item.title ?? item.name ?? `${item.destination} · ${item.days} days`,
+      ),
+    );
     const nextVariation = variation + 1;
     setVariation(nextVariation);
     const restoredNames: Record<string, string> = {};
-    (Array.isArray(item.activities) ? item.activities : []).forEach((day: any, dayIndex: number) => {
-      (Array.isArray(day) ? day : []).forEach((activity: any, slotIndex: number) => {
-        if (activity.name) {
-          restoredNames[`${item.destination}-${item.style ?? "Mixed"}-${item.interests ?? ""}-${item.budgetComfort ?? "Balanced"}-${nextVariation}-${dayIndex}-${slotIndex}`] = String(activity.name);
-        }
-      });
-    });
+    (Array.isArray(item.activities) ? item.activities : []).forEach(
+      (day: any, dayIndex: number) => {
+        (Array.isArray(day) ? day : []).forEach(
+          (activity: any, slotIndex: number) => {
+            if (activity.name) {
+              restoredNames[`${dayIndex}-${slotIndex}`] = String(activity.name);
+            }
+          },
+        );
+      },
+    );
     setEdited(restoredNames);
     setEditingId(null);
     setApiError("");
@@ -772,7 +785,12 @@ export default function Itinerary() {
                 disabled={savingPlan || !selectedTripId || !destinationInfo}
                 className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#dcebe2] px-3 text-[10px] font-bold text-[#24594d] transition hover:bg-white disabled:opacity-60"
               >
-                <Check size={13} /> {savingPlan ? "Saving…" : editingPlanId ? "Save changes" : "Save"}
+                <Check size={13} />{" "}
+                {savingPlan
+                  ? "Saving…"
+                  : editingPlanId
+                    ? "Save changes"
+                    : "Save"}
               </button>
             </div>
           </div>

@@ -52,7 +52,7 @@ const patchSchema = z
     budgetComfort: z.enum(["Thoughtful", "Balanced", "Flexible"]).optional(),
     startTime: z.string().trim().max(20).optional(),
     interests: z.string().trim().max(300).optional(),
-    activities: z.array(z.unknown()).max(90).optional(),
+    activities: activityDaysSchema.optional(),
   })
   .strict()
   .refine((value) => Object.keys(value).some((key) => key !== "id"));
@@ -84,7 +84,9 @@ router.post("/", (async (req, res) => {
     return res.status(404).json({ error: "Trip not found." });
   const itinerary = await Itinerary.create({
     ...parsed.data,
-    title: parsed.data.title ?? `${parsed.data.destination} · ${parsed.data.days} days`,
+    title:
+      parsed.data.title ??
+      `${parsed.data.destination} · ${parsed.data.days} days`,
     tripId: parsed.data.tripId ?? null,
     userId: req.userId,
   });
@@ -94,13 +96,15 @@ router.post("/", (async (req, res) => {
 router.patch("/", (async (req, res) => {
   const parsed = patchSchema.safeParse(req.body);
   if (!parsed.success)
-    return res
-      .status(400)
-      .json({
-        error: parsed.error.issues[0]?.message ?? "Invalid itinerary update.",
-      });
+    return res.status(400).json({
+      error: parsed.error.issues[0]?.message ?? "Invalid itinerary update.",
+    });
   const { id, ...changes } = parsed.data;
-  if (changes.tripId && !await Trip.exists({ _id: changes.tripId, userId: req.userId })) return res.status(404).json({ error: "Trip not found." });
+  if (
+    changes.tripId &&
+    !(await Trip.exists({ _id: changes.tripId, userId: req.userId }))
+  )
+    return res.status(404).json({ error: "Trip not found." });
   const itinerary = await Itinerary.findOneAndUpdate(
     { _id: id, userId: req.userId },
     { $set: changes },
