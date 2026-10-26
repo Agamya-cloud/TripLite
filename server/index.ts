@@ -2,7 +2,6 @@ import "dotenv/config";
 import express, { type RequestHandler } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
-import { handleDemo } from "./routes/demo";
 import authRoutes from "./routes/auth";
 import tripRoutes from "./routes/trips";
 import expenseRoutes from "./routes/expenses";
@@ -68,10 +67,8 @@ export function createServer() {
   };
 
   app.get("/api/ping", (_req, res) => {
-    const ping = process.env.PING_MESSAGE ?? "ping";
-    res.json({ message: ping });
+    res.json({ message: "ping" });
   });
-  app.get("/api/demo", handleDemo);
   app.use("/api/auth", requireDatabase, authRoutes);
   app.use("/api/trips", requireDatabase, requireAuth, tripRoutes);
   app.use("/api/expenses", requireDatabase, requireAuth, expenseRoutes);
