@@ -131,6 +131,8 @@ const itinerarySchema = new Schema(
       enum: ["Thoughtful", "Balanced", "Flexible"],
       default: "Balanced",
     },
+    startTime: { type: String, trim: true, maxlength: 20, default: "8:30 AM" },
+    interests: { type: String, trim: true, maxlength: 300, default: "" },
     activities: { type: [Schema.Types.Mixed], default: [] },
   },
   { timestamps: true },

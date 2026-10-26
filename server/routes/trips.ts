@@ -5,7 +5,7 @@ import { Expense, ChecklistItem, Itinerary, Trip } from "../models";
 
 const router = Router();
 const date = z.string().datetime().or(z.string().date());
-const tripFields = z
+const tripBaseFields = z
   .object({
     name: z.string().trim().min(1).max(100),
     destination: z.string().trim().min(1).max(120),
@@ -24,27 +24,16 @@ const tripFields = z
       .optional(),
     notes: z.string().trim().max(3000).default(""),
   })
-  .strict()
-  .refine(
-    (value) =>
-      new Date(value.endDate).getTime() >= new Date(value.startDate).getTime(),
-    {
-      message: "Return date must be on or after departure date.",
-      path: ["endDate"],
-    },
-  );
-const updateFields = tripFields
-  .partial()
-  .refine(
-    (value) =>
-      !value.startDate ||
-      !value.endDate ||
-      new Date(value.endDate).getTime() >= new Date(value.startDate).getTime(),
-    {
-      message: "Return date must be on or after departure date.",
-      path: ["endDate"],
-    },
-  );
+  .strict();
+const tripFields = tripBaseFields.refine(
+  (value) =>
+    new Date(value.endDate).getTime() >= new Date(value.startDate).getTime(),
+  {
+    message: "Return date must be on or after departure date.",
+    path: ["endDate"],
+  },
+);
+const updateFields = tripBaseFields.partial();
 const isObjectId = (value: string) => Types.ObjectId.isValid(value);
 
 router.get("/", (async (req, res) => {
@@ -70,11 +59,9 @@ router.get("/", (async (req, res) => {
 router.post("/", (async (req, res) => {
   const parsed = tripFields.safeParse(req.body);
   if (!parsed.success)
-    return res
-      .status(400)
-      .json({
-        error: parsed.error.issues[0]?.message ?? "Invalid trip details.",
-      });
+    return res.status(400).json({
+      error: parsed.error.issues[0]?.message ?? "Invalid trip details.",
+    });
   const trip = await Trip.create({ ...parsed.data, userId: req.userId });
   return res.status(201).json({ data: { trip } });
 }) as RequestHandler);
@@ -94,11 +81,9 @@ router.patch("/:id", (async (req, res) => {
     return res.status(400).json({ error: "Invalid trip ID." });
   const parsed = updateFields.safeParse(req.body);
   if (!parsed.success)
-    return res
-      .status(400)
-      .json({
-        error: parsed.error.issues[0]?.message ?? "Invalid trip details.",
-      });
+    return res.status(400).json({
+      error: parsed.error.issues[0]?.message ?? "Invalid trip details.",
+    });
   if (!Object.keys(parsed.data).length)
     return res
       .status(400)

@@ -108,6 +108,12 @@ export default function TripLiteLayout() {
               Your next great story starts here
             </span>
             <Link
+              to="/auth"
+              className="text-[10px] font-bold text-[#287064] hover:underline"
+            >
+              Sign in
+            </Link>
+            <Link
               to="/settings"
               className="flex h-9 w-9 items-center justify-center rounded-full border border-[#dce2d8] bg-[#e7eee6] text-[11px] font-bold text-[#245e50]"
               aria-label="Settings and profile"

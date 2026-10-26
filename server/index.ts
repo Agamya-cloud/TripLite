@@ -32,15 +32,38 @@ export function createServer() {
   app.use(express.json({ limit: "100kb" }));
   app.use(express.urlencoded({ extended: true, limit: "100kb" }));
   app.use(cookieParser());
+  app.use("/api", (req, res, next) => {
+    if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) return next();
+    const origin = req.get("origin");
+    if (!origin) return next();
+    try {
+      if (
+        new URL(origin).host === req.get("host") ||
+        allowedOrigins.has(origin)
+      )
+        return next();
+    } catch {
+      return res.status(403).json({ error: "Request origin is not allowed." });
+    }
+    return res.status(403).json({ error: "Request origin is not allowed." });
+  });
 
-  const requireDatabase: RequestHandler = (_req, res, next) => {
+  const requireDatabase: RequestHandler = async (_req, res, next) => {
+    if (isDatabaseReady()) return next();
+    try {
+      const pendingConnection = connectDatabase();
+      if (pendingConnection) await pendingConnection;
+    } catch {
+      return res
+        .status(503)
+        .json({ error: "The TripLite database is unavailable." });
+    }
     if (isDatabaseReady()) return next();
     return res
       .status(503)
       .json({
-        error: process.env.MONGODB_URI
-          ? "The TripLite database is unavailable."
-          : "MongoDB is not configured. Set MONGODB_URI to enable accounts and saved travel data.",
+        error:
+          "MongoDB is not configured. Set MONGODB_URI to enable accounts and saved travel data.",
       });
   };
 
@@ -69,14 +92,12 @@ export function createServer() {
           "TripLite request failed:",
           error instanceof Error ? error.message : error,
         );
-      return res
-        .status(status)
-        .json({
-          error:
-            status === 400
-              ? "Request body is invalid JSON."
-              : "Something went wrong. Please try again.",
-        });
+      return res.status(status).json({
+        error:
+          status === 400
+            ? "Request body is invalid JSON."
+            : "Something went wrong. Please try again.",
+      });
     },
   );
 

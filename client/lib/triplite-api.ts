@@ -61,6 +61,7 @@ export function records(value: any): RecordData[] {
   if (Array.isArray(value?.trips)) return value.trips;
   if (Array.isArray(value?.expenses)) return value.expenses;
   if (Array.isArray(value?.checklists)) return value.checklists;
+  if (Array.isArray(value?.itineraries)) return value.itineraries;
   return [];
 }
 

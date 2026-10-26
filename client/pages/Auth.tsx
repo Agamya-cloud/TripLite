@@ -92,7 +92,7 @@ export default function AuthPage() {
             <input
               required
               type="password"
-              minLength={6}
+              minLength={8}
               autoComplete={
                 mode === "login" ? "current-password" : "new-password"
               }

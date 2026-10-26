@@ -12,25 +12,50 @@ const style = z.enum([
   "Adventure",
   "Relaxation",
 ]);
+const activitySchema = z
+  .object({
+    id: z.string().max(200),
+    name: z.string().trim().min(1).max(120),
+    description: z.string().max(500),
+    duration: z.string().max(80),
+    estimate: z.number().finite().min(0).max(100000),
+    styles: z.array(z.string().max(24)).max(6),
+    interests: z.array(z.string().max(60)).max(20),
+    slot: z.enum(["Morning", "Afternoon", "Evening"]),
+    day: z.number().int().min(1).max(30).optional(),
+  })
+  .strict();
+const activityDaysSchema = z.array(z.array(activitySchema).max(3)).max(30);
 const createSchema = z
   .object({
     tripId: z.string().refine(Types.ObjectId.isValid).nullable().optional(),
-    title: z.string().trim().min(1).max(120),
+    title: z.string().trim().min(1).max(120).optional(),
     destination: z.string().trim().min(1).max(120),
     days: z.number().int().min(1).max(30),
     style: style.default("Mixed"),
     budgetComfort: z
       .enum(["Thoughtful", "Balanced", "Flexible"])
       .default("Balanced"),
-    activities: z.array(z.record(z.string(), z.unknown())).max(90).default([]),
+    startTime: z.string().trim().max(20).default("8:30 AM"),
+    interests: z.string().trim().max(300).default(""),
+    activities: activityDaysSchema.default([]),
   })
   .strict();
 const patchSchema = z
   .object({
     id: z.string().refine(Types.ObjectId.isValid),
-    title: z.string().trim().min(1).max(120),
+    tripId: z.string().refine(Types.ObjectId.isValid).nullable().optional(),
+    title: z.string().trim().min(1).max(120).optional(),
+    destination: z.string().trim().min(1).max(120).optional(),
+    days: z.number().int().min(1).max(30).optional(),
+    style: style.optional(),
+    budgetComfort: z.enum(["Thoughtful", "Balanced", "Flexible"]).optional(),
+    startTime: z.string().trim().max(20).optional(),
+    interests: z.string().trim().max(300).optional(),
+    activities: z.array(z.unknown()).max(90).optional(),
   })
-  .strict();
+  .strict()
+  .refine((value) => Object.keys(value).some((key) => key !== "id"));
 
 router.get("/", (async (req, res) => {
   const filter: Record<string, unknown> = { userId: req.userId };
@@ -59,6 +84,7 @@ router.post("/", (async (req, res) => {
     return res.status(404).json({ error: "Trip not found." });
   const itinerary = await Itinerary.create({
     ...parsed.data,
+    title: parsed.data.title ?? `${parsed.data.destination} · ${parsed.data.days} days`,
     tripId: parsed.data.tripId ?? null,
     userId: req.userId,
   });
@@ -73,10 +99,11 @@ router.patch("/", (async (req, res) => {
       .json({
         error: parsed.error.issues[0]?.message ?? "Invalid itinerary update.",
       });
-  const { id, title } = parsed.data;
+  const { id, ...changes } = parsed.data;
+  if (changes.tripId && !await Trip.exists({ _id: changes.tripId, userId: req.userId })) return res.status(404).json({ error: "Trip not found." });
   const itinerary = await Itinerary.findOneAndUpdate(
     { _id: id, userId: req.userId },
-    { $set: { title } },
+    { $set: changes },
     { new: true, runValidators: true },
   ).lean();
   if (!itinerary)

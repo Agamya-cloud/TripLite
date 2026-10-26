@@ -280,7 +280,8 @@ function buildDays(
   budget: string,
   variation: number,
 ): DayActivity[][] {
-  const curated = destinations[destination].activities;
+  const curated = destinations[destination]?.activities;
+  if (!curated?.length) return [];
   const styleMatches = curated.filter((activity) =>
     activity.styles.includes(style),
   );
@@ -325,10 +326,7 @@ function buildDays(
 export default function Itinerary() {
   const [searchParams] = useSearchParams();
   const [destination, setDestination] = useState(
-    searchParams.get("destination") &&
-      destinations[searchParams.get("destination")!]
-      ? searchParams.get("destination")!
-      : "Amalfi Coast",
+    searchParams.get("destination") ?? "Amalfi Coast",
   );
   const [days, setDays] = useState(4);
   const [style, setStyle] = useState<TravelStyle>("Mixed");
@@ -340,12 +338,32 @@ export default function Itinerary() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [savedPlans, setSavedPlans] = useState<RecordData[]>([]);
+  const [ownedTrips, setOwnedTrips] = useState<RecordData[]>([]);
+  const [selectedTripId, setSelectedTripId] = useState(
+    searchParams.get("tripId") ?? "",
+  );
   const [apiError, setApiError] = useState("");
   const [savingPlan, setSavingPlan] = useState(false);
+  const [editingPlanId, setEditingPlanId] = useState("");
+  const [editingPlanTitle, setEditingPlanTitle] = useState("");
 
   const loadSavedPlans = async () => {
     try {
-      setSavedPlans(records(await api("/api/itineraries")));
+      const [plans, trips] = await Promise.all([
+        api("/api/itineraries"),
+        api("/api/trips"),
+      ]);
+      const tripList = records(trips);
+      setSavedPlans(records(plans));
+      setOwnedTrips(tripList);
+      const requestedTripId = searchParams.get("tripId") ?? "";
+      setSelectedTripId((current) =>
+        tripList.some((trip) => idOf(trip) === current)
+          ? current
+          : tripList.some((trip) => idOf(trip) === requestedTripId)
+            ? requestedTripId
+            : "",
+      );
       setApiError("");
     } catch (error) {
       setApiError((error as Error).message);
@@ -355,32 +373,75 @@ export default function Itinerary() {
     void loadSavedPlans();
   }, []);
   const savePlan = async () => {
+    if (!destinations[destination]) {
+      setApiError(
+        "There is no curated itinerary data for this destination yet.",
+      );
+      return;
+    }
+    if (!ownedTrips.some((trip) => idOf(trip) === selectedTripId)) {
+      setApiError(
+        "Choose one of your saved trips before saving this itinerary.",
+      );
+      return;
+    }
     setSavingPlan(true);
     try {
-      await api(
-        "/api/itineraries",
-        json("POST", {
-          title: `${destination} · ${days} days`,
-          destination,
-          days,
-          style,
-          budgetComfort: budget,
-          activities: plan.map((day, index) =>
-            day.map((activity) => ({
-              ...activity,
-              day: index + 1,
-              name: edited[activity.id] || activity.name,
-            })),
-          ),
-        }),
-      );
+      const payload = {
+        tripId: selectedTripId,
+        title: editingPlanTitle || `${destination} · ${days} days`,
+        destination,
+        days,
+        style,
+        budgetComfort: budget,
+        startTime,
+        interests,
+        activities: plan.map((day, index) =>
+          day.map((activity) => ({
+            ...activity,
+            day: index + 1,
+            name: edited[activity.id] || activity.name,
+          })),
+        ),
+      };
+      if (editingPlanId) {
+        await api("/api/itineraries", json("PATCH", { id: editingPlanId, ...payload }));
+      } else {
+        await api("/api/itineraries", json("POST", payload));
+      }
       await loadSavedPlans();
+      setEditingPlanId("");
+      setEditingPlanTitle("");
       toast.success("Itinerary saved");
     } catch (error) {
       setApiError((error as Error).message);
     } finally {
       setSavingPlan(false);
     }
+  };
+  const loadPlan = (item: RecordData) => {
+    setDestination(String(item.destination ?? ""));
+    setDays(Math.min(14, Math.max(1, Number(item.days) || 1)));
+    setStyle((styles.includes(item.style) ? item.style : "Mixed") as TravelStyle);
+    setBudget(String(item.budgetComfort ?? "Balanced"));
+    setStartTime(String(item.startTime ?? "8:30 AM"));
+    setInterests(String(item.interests ?? ""));
+    setSelectedTripId(String(item.tripId ?? ""));
+    setEditingPlanId(idOf(item));
+    setEditingPlanTitle(String(item.title ?? item.name ?? `${item.destination} · ${item.days} days`));
+    const nextVariation = variation + 1;
+    setVariation(nextVariation);
+    const restoredNames: Record<string, string> = {};
+    (Array.isArray(item.activities) ? item.activities : []).forEach((day: any, dayIndex: number) => {
+      (Array.isArray(day) ? day : []).forEach((activity: any, slotIndex: number) => {
+        if (activity.name) {
+          restoredNames[`${item.destination}-${item.style ?? "Mixed"}-${item.interests ?? ""}-${item.budgetComfort ?? "Balanced"}-${nextVariation}-${dayIndex}-${slotIndex}`] = String(activity.name);
+        }
+      });
+    });
+    setEdited(restoredNames);
+    setEditingId(null);
+    setApiError("");
   };
   const deletePlan = async (item: RecordData) => {
     try {
@@ -409,16 +470,18 @@ export default function Itinerary() {
 
   useEffect(() => {
     const requested = searchParams.get("destination");
-    if (requested && destinations[requested]) setDestination(requested);
+    if (requested) setDestination(requested);
   }, [searchParams]);
 
   const plan = useMemo(
     () => buildDays(destination, days, style, interests, budget, variation),
     [destination, days, style, interests, budget, variation],
   );
-  const totalEstimate =
-    plan.flat().reduce((total, activity) => total + activity.estimate, 0) +
-    days * 10;
+  const destinationInfo = destinations[destination];
+  const totalEstimate = destinationInfo
+    ? plan.flat().reduce((total, activity) => total + activity.estimate, 0) +
+      days * 10
+    : null;
   const mapSearch = (place: string) =>
     `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${place}, ${destination}`)}`;
 
@@ -480,6 +543,29 @@ export default function Itinerary() {
           </button>
         </div>
       )}
+      <section className="mb-5 rounded-2xl border border-[#e8e5dc] bg-white p-4">
+        <label className="block max-w-lg text-[10px] font-bold text-[#52645a]">
+          Save itinerary to a trip
+          <select
+            required
+            value={selectedTripId}
+            onChange={(event) => setSelectedTripId(event.target.value)}
+            className="mt-1.5 h-10 w-full rounded-xl border border-[#e5e4dc] bg-[#fcfbf8] px-3 text-[12px] outline-none focus:border-[#4d8d7d]"
+          >
+            <option value="">Choose an owned trip…</option>
+            {ownedTrips.map((trip) => (
+              <option key={idOf(trip)} value={idOf(trip)}>
+                {trip.name} · {trip.destination}
+              </option>
+            ))}
+          </select>
+        </label>
+        {ownedTrips.length === 0 && (
+          <p className="mt-2 text-[10px] text-[#a7513c]">
+            Create a trip first to save this itinerary.
+          </p>
+        )}
+      </section>
       {savedPlans.length > 0 && (
         <section className="mb-5 rounded-2xl border border-[#e8e5dc] bg-white p-4">
           <div className="mb-2 flex items-center justify-between">
@@ -502,6 +588,12 @@ export default function Itinerary() {
                     item.destination ??
                     "Saved itinerary"}
                 </span>
+                <button
+                  onClick={() => loadPlan(item)}
+                  className="font-bold text-[#367465] hover:underline"
+                >
+                  Load & edit
+                </button>
                 <button
                   onClick={() => void renamePlan(item)}
                   className="font-bold text-[#367465] hover:underline"
@@ -547,6 +639,11 @@ export default function Itinerary() {
                 }}
                 className="h-10 w-full rounded-xl border border-[#e5e4dc] bg-[#fcfbf8] px-3 text-[12px] text-[#34564b] outline-none transition focus:border-[#4d8d7d] focus:ring-2 focus:ring-[#4d8d7d]/10"
               >
+                {!destinations[destination] && (
+                  <option value={destination}>
+                    {destination} · curated guide unavailable
+                  </option>
+                )}
                 {Object.entries(destinations).map(([name, info]) => (
                   <option key={name} value={name}>
                     {name}, {info.country}
@@ -644,7 +741,8 @@ export default function Itinerary() {
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-[#174f47] px-4 py-4 text-white sm:px-5">
             <div>
               <div className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[.12em] text-white/65">
-                <MapPin size={12} /> {destinations[destination].country}
+                <MapPin size={12} />{" "}
+                {destinationInfo?.country ?? "Curated guide unavailable"}
               </div>
               <h2 className="mt-1 font-heading text-[18px] font-bold tracking-[-.03em]">
                 {destination}{" "}
@@ -671,138 +769,146 @@ export default function Itinerary() {
               <button
                 type="button"
                 onClick={() => void savePlan()}
-                disabled={savingPlan}
+                disabled={savingPlan || !selectedTripId || !destinationInfo}
                 className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#dcebe2] px-3 text-[10px] font-bold text-[#24594d] transition hover:bg-white disabled:opacity-60"
               >
-                <Check size={13} /> {savingPlan ? "Saving…" : "Save"}
+                <Check size={13} /> {savingPlan ? "Saving…" : editingPlanId ? "Save changes" : "Save"}
               </button>
             </div>
           </div>
 
-          <div className="space-y-3">
-            {plan.map((activities, dayIndex) => (
-              <article
-                key={`${variation}-${dayIndex}`}
-                className="overflow-hidden rounded-2xl border border-[#e8e5dc] bg-white"
-              >
-                <div className="flex items-center justify-between border-b border-[#f0eee8] px-4 py-3 sm:px-5">
-                  <div className="flex items-center gap-3">
-                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#e8f0eb] font-heading text-[11px] font-bold text-[#2c7060]">
-                      {String(dayIndex + 1).padStart(2, "0")}
-                    </span>
-                    <div>
-                      <h3 className="text-[12px] font-bold">
-                        Day {dayIndex + 1}
-                      </h3>
-                      <p className="text-[9px] text-[#9a9c91]">
-                        A {style.toLowerCase()}-leaning day, starting around{" "}
-                        {startTime}
-                      </p>
+          {!destinationInfo ? (
+            <div className="rounded-2xl border border-dashed border-[#dedfd5] bg-white p-6 text-center text-[12px] text-[#858b80]">
+              There is no curated itinerary for this destination yet. Choose one
+              of the supported destinations to see day-by-day suggestions; no
+              attraction or price estimates are invented.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {plan.map((activities, dayIndex) => (
+                <article
+                  key={`${variation}-${dayIndex}`}
+                  className="overflow-hidden rounded-2xl border border-[#e8e5dc] bg-white"
+                >
+                  <div className="flex items-center justify-between border-b border-[#f0eee8] px-4 py-3 sm:px-5">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#e8f0eb] font-heading text-[11px] font-bold text-[#2c7060]">
+                        {String(dayIndex + 1).padStart(2, "0")}
+                      </span>
+                      <div>
+                        <h3 className="text-[12px] font-bold">
+                          Day {dayIndex + 1}
+                        </h3>
+                        <p className="text-[9px] text-[#9a9c91]">
+                          A {style.toLowerCase()}-leaning day, starting around{" "}
+                          {startTime}
+                        </p>
+                      </div>
                     </div>
+                    <span className="hidden items-center gap-1 text-[9px] text-[#92968b] sm:flex">
+                      <Clock3 size={12} /> Flexible pacing
+                    </span>
                   </div>
-                  <span className="hidden items-center gap-1 text-[9px] text-[#92968b] sm:flex">
-                    <Clock3 size={12} /> Flexible pacing
-                  </span>
-                </div>
-                <div className="divide-y divide-[#f3f1eb] px-4 sm:px-5">
-                  {activities.map((activity) => {
-                    const Icon = slotIcons[activity.slot];
-                    const activityName = edited[activity.id] || activity.name;
-                    const isEditing = editingId === activity.id;
-                    return (
-                      <div
-                        key={activity.id}
-                        className="grid grid-cols-[25px_minmax(0,1fr)] gap-2.5 py-3.5 sm:grid-cols-[67px_25px_minmax(0,1fr)_auto] sm:gap-3"
-                      >
-                        <span className="col-span-2 mb-[-4px] text-[9px] font-bold text-[#839087] sm:col-span-1 sm:mb-0 sm:pt-1">
-                          {activity.slot}
-                        </span>
-                        <span className="hidden h-6 w-6 items-center justify-center rounded-lg bg-[#f4f4ed] text-[#688176] sm:flex">
-                          <Icon size={13} />
-                        </span>
-                        <div className="min-w-0">
-                          {isEditing ? (
-                            <div className="mb-1 flex gap-1.5">
-                              <input
-                                autoFocus
-                                value={draft}
-                                onChange={(event) =>
-                                  setDraft(event.target.value)
-                                }
-                                onKeyDown={(event) => {
-                                  if (event.key === "Enter") {
+                  <div className="divide-y divide-[#f3f1eb] px-4 sm:px-5">
+                    {activities.map((activity) => {
+                      const Icon = slotIcons[activity.slot];
+                      const activityName = edited[activity.id] || activity.name;
+                      const isEditing = editingId === activity.id;
+                      return (
+                        <div
+                          key={activity.id}
+                          className="grid grid-cols-[25px_minmax(0,1fr)] gap-2.5 py-3.5 sm:grid-cols-[67px_25px_minmax(0,1fr)_auto] sm:gap-3"
+                        >
+                          <span className="col-span-2 mb-[-4px] text-[9px] font-bold text-[#839087] sm:col-span-1 sm:mb-0 sm:pt-1">
+                            {activity.slot}
+                          </span>
+                          <span className="hidden h-6 w-6 items-center justify-center rounded-lg bg-[#f4f4ed] text-[#688176] sm:flex">
+                            <Icon size={13} />
+                          </span>
+                          <div className="min-w-0">
+                            {isEditing ? (
+                              <div className="mb-1 flex gap-1.5">
+                                <input
+                                  autoFocus
+                                  value={draft}
+                                  onChange={(event) =>
+                                    setDraft(event.target.value)
+                                  }
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter") {
+                                      setEdited((current) => ({
+                                        ...current,
+                                        [activity.id]:
+                                          draft.trim() || activity.name,
+                                      }));
+                                      setEditingId(null);
+                                    }
+                                    if (event.key === "Escape")
+                                      setEditingId(null);
+                                  }}
+                                  className="min-w-0 flex-1 rounded-md border border-[#bdd0c4] px-2 py-1 text-[11px] outline-none"
+                                  aria-label="Edit activity name"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
                                     setEdited((current) => ({
                                       ...current,
                                       [activity.id]:
                                         draft.trim() || activity.name,
                                     }));
                                     setEditingId(null);
-                                  }
-                                  if (event.key === "Escape")
-                                    setEditingId(null);
-                                }}
-                                className="min-w-0 flex-1 rounded-md border border-[#bdd0c4] px-2 py-1 text-[11px] outline-none"
-                                aria-label="Edit activity name"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEdited((current) => ({
-                                    ...current,
-                                    [activity.id]:
-                                      draft.trim() || activity.name,
-                                  }));
-                                  setEditingId(null);
-                                }}
-                                aria-label="Save activity name"
-                                className="rounded-md bg-[#e9f1ec] px-2 text-[#2c7060]"
+                                  }}
+                                  aria-label="Save activity name"
+                                  className="rounded-md bg-[#e9f1ec] px-2 text-[#2c7060]"
+                                >
+                                  <Check size={14} />
+                                </button>
+                              </div>
+                            ) : (
+                              <h4 className="flex items-center gap-1.5 text-[11px] font-bold text-[#35564b]">
+                                {activityName}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setDraft(activityName);
+                                    setEditingId(activity.id);
+                                  }}
+                                  aria-label={`Edit ${activityName}`}
+                                  className="rounded p-0.5 text-[#a2a69b] hover:bg-[#f0f3ed] hover:text-[#347365]"
+                                >
+                                  <Pencil size={11} />
+                                </button>
+                              </h4>
+                            )}
+                            <p className="mt-1 max-w-[560px] text-[10px] leading-relaxed text-[#898e84]">
+                              {activity.description}
+                            </p>
+                            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                              <span className="text-[9px] text-[#8b9186]">
+                                {activity.duration}
+                              </span>
+                              <a
+                                href={mapSearch(activity.name)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 text-[9px] font-semibold text-[#428072] hover:underline"
                               >
-                                <Check size={14} />
-                              </button>
+                                <MapPin size={10} /> Maps
+                              </a>
                             </div>
-                          ) : (
-                            <h4 className="flex items-center gap-1.5 text-[11px] font-bold text-[#35564b]">
-                              {activityName}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setDraft(activityName);
-                                  setEditingId(activity.id);
-                                }}
-                                aria-label={`Edit ${activityName}`}
-                                className="rounded p-0.5 text-[#a2a69b] hover:bg-[#f0f3ed] hover:text-[#347365]"
-                              >
-                                <Pencil size={11} />
-                              </button>
-                            </h4>
-                          )}
-                          <p className="mt-1 max-w-[560px] text-[10px] leading-relaxed text-[#898e84]">
-                            {activity.description}
-                          </p>
-                          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-                            <span className="text-[9px] text-[#8b9186]">
-                              {activity.duration}
-                            </span>
-                            <a
-                              href={mapSearch(activity.name)}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-1 text-[9px] font-semibold text-[#428072] hover:underline"
-                            >
-                              <MapPin size={10} /> Maps
-                            </a>
                           </div>
+                          <span className="col-start-2 row-start-2 whitespace-nowrap pt-1 text-[9px] text-[#91978c] sm:col-start-auto sm:row-start-auto sm:pt-1.5">
+                            ~{money.format(activity.estimate)} / person
+                          </span>
                         </div>
-                        <span className="col-start-2 row-start-2 whitespace-nowrap pt-1 text-[9px] text-[#91978c] sm:col-start-auto sm:row-start-auto sm:pt-1.5">
-                          ~{money.format(activity.estimate)} / person
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </article>
-            ))}
-          </div>
+                      );
+                    })}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
 
           <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_1.2fr]">
             <div className="rounded-2xl border border-[#e8e5dc] bg-white p-4">
@@ -814,12 +920,18 @@ export default function Itinerary() {
                   Rough planning estimate
                 </span>
               </div>
-              <p className="font-heading text-[22px] font-bold tracking-[-.04em] text-[#28594d]">
-                ~{money.format(totalEstimate)}{" "}
-                <span className="font-sans text-[9px] font-medium tracking-normal text-[#989a90]">
-                  per person · {budget.toLowerCase()}
-                </span>
-              </p>
+              {totalEstimate === null ? (
+                <p className="font-heading text-[15px] font-bold text-[#858b80]">
+                  No estimate available
+                </p>
+              ) : (
+                <p className="font-heading text-[22px] font-bold tracking-[-.04em] text-[#28594d]">
+                  ~{money.format(totalEstimate)}{" "}
+                  <span className="font-sans text-[9px] font-medium tracking-normal text-[#989a90]">
+                    per person · {budget.toLowerCase()}
+                  </span>
+                </p>
+              )}
               <p className="mt-1 text-[9px] leading-relaxed text-[#9b9d92]">
                 Includes curated activity placeholders and a simple
                 local-transport allowance. Not live prices or quotes; confirm
@@ -834,7 +946,11 @@ export default function Itinerary() {
                 <span className="text-[10px] font-bold">A few local notes</span>
               </div>
               <ul className="space-y-1.5">
-                {destinations[destination].tips.map((tip) => (
+                {(
+                  destinationInfo?.tips ?? [
+                    "Travel guidance will be available when a curated destination profile is added.",
+                  ]
+                ).map((tip) => (
                   <li
                     key={tip}
                     className="flex gap-1.5 text-[9px] leading-relaxed text-[#758277]"

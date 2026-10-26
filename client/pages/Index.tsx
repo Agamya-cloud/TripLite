@@ -81,25 +81,84 @@ export default function Index() {
   useEffect(() => {
     void load();
   }, []);
-  const totalBudget = trips.reduce(
-    (sum, trip) => sum + Number(trip.budget || 0),
-    0,
+  const currencyTotals = (
+    rows: RecordData[],
+    amountOf: (row: RecordData) => number,
+    currencyOf: (row: RecordData) => string,
+  ) => {
+    const totals = new Map<string, number>();
+    rows.forEach((row) => {
+      const currency = currencyOf(row);
+      totals.set(currency, (totals.get(currency) ?? 0) + amountOf(row));
+    });
+    return (
+      [...totals.entries()]
+        .map(([currency, amount]) =>
+          currency === "Currency unknown"
+            ? `${amount.toLocaleString()} · currency unknown`
+            : `${money(amount, currency)} ${currency}`,
+        )
+        .join(" · ") || "—"
+    );
+  };
+  const tripById = new Map(trips.map((trip) => [idOf(trip), trip]));
+  const totalBudget = currencyTotals(
+    trips.filter((trip) => Number(trip.budget) > 0),
+    (trip) => Number(trip.budget),
+    (trip) => String(trip.currency || "USD"),
   );
-  const totalSpent = expenses.reduce(
-    (sum, expense) => sum + Number(expense.amount || 0),
-    0,
+  const totalSpent = currencyTotals(
+    expenses,
+    (expense) => Number(expense.amount || 0),
+    (expense) => {
+      const trip = tripById.get(expenseTrip(expense));
+      return trip ? String(trip.currency || "USD") : "Currency unknown";
+    },
   );
+  const spentByTrip = new Map<string, number>();
+  expenses.forEach((expense) => {
+    const tripId = expenseTrip(expense);
+    spentByTrip.set(
+      tripId,
+      (spentByTrip.get(tripId) ?? 0) + Number(expense.amount || 0),
+    );
+  });
+  const remainingByCurrency = new Map<string, number>();
+  trips.forEach((trip) => {
+    const currency = String(trip.currency || "USD");
+    remainingByCurrency.set(
+      currency,
+      (remainingByCurrency.get(currency) ?? 0) +
+        Number(trip.budget || 0) -
+        (spentByTrip.get(idOf(trip)) ?? 0),
+    );
+  });
+  const remainingBudget =
+    [...remainingByCurrency.entries()]
+      .map(([currency, amount]) => `${money(amount, currency)} ${currency}`)
+      .join(" · ") || "—";
+  const today = new Date().toISOString().slice(0, 10);
   const checklistDone = checklists.filter((item) =>
     Boolean(item.completed ?? item.checked),
   ).length;
   const nextTrips = useMemo(
     () =>
       [...trips]
+        .filter((trip) => String(trip.endDate ?? "").slice(0, 10) >= today)
         .sort((a, b) =>
           String(a.startDate ?? "").localeCompare(String(b.startDate ?? "")),
         )
         .slice(0, 3),
-    [trips],
+    [trips, today],
+  );
+  const recentExpenses = useMemo(
+    () =>
+      [...expenses]
+        .sort((a, b) =>
+          String(b.date ?? "").localeCompare(String(a.date ?? "")),
+        )
+        .slice(0, 5),
+    [expenses],
   );
 
   return (
@@ -126,6 +185,26 @@ export default function Index() {
           <ArrowRight size={14} className="ml-1" />
         </Link>
       </section>
+      <nav className="mb-6 flex flex-wrap gap-2" aria-label="Quick actions">
+        <Link
+          to="/itinerary"
+          className="inline-flex h-9 items-center gap-2 rounded-xl border border-[#dfe5db] bg-white px-3 text-[10px] font-bold text-[#35685a] hover:bg-[#eef4ee]"
+        >
+          <Compass size={14} /> Plan itinerary
+        </Link>
+        <Link
+          to="/expenses"
+          className="inline-flex h-9 items-center gap-2 rounded-xl border border-[#dfe5db] bg-white px-3 text-[10px] font-bold text-[#35685a] hover:bg-[#eef4ee]"
+        >
+          <Plus size={14} /> Add expense
+        </Link>
+        <Link
+          to="/checklist"
+          className="inline-flex h-9 items-center gap-2 rounded-xl border border-[#dfe5db] bg-white px-3 text-[10px] font-bold text-[#35685a] hover:bg-[#eef4ee]"
+        >
+          <ListChecks size={14} /> Open checklist
+        </Link>
+      </nav>
       {error && (
         <div
           role="alert"
@@ -168,7 +247,7 @@ export default function Index() {
         </div>
       </section>
       <section
-        className="mb-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+        className="mb-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-5"
         aria-label="Travel overview"
       >
         {[
@@ -181,15 +260,22 @@ export default function Index() {
           },
           {
             label: "Trip budgets",
-            value: loading ? "…" : money(totalBudget),
-            detail: "combined planned budget",
+            value: loading ? "…" : totalBudget,
+            detail: "grouped by currency",
             icon: Wallet,
             tint: "bg-[#f7ebdc] text-[#bb7b3d]",
           },
           {
+            label: "Remaining budget",
+            value: loading ? "…" : remainingBudget,
+            detail: "by trip currency",
+            icon: Wallet,
+            tint: "bg-[#e8eaf3] text-[#6971a0]",
+          },
+          {
             label: "Expenses recorded",
-            value: loading ? "…" : money(totalSpent),
-            detail: `${expenses.length} entries`,
+            value: loading ? "…" : totalSpent,
+            detail: `${expenses.length} entries · grouped by currency`,
             icon: Wallet,
             tint: "bg-[#e8eaf3] text-[#6971a0]",
           },
@@ -262,7 +348,9 @@ export default function Index() {
                     </p>
                   </div>
                   <span className="text-[10px] font-semibold text-[#397260]">
-                    {money(trip.budget || 0)}{" "}
+                    {trip.budget
+                      ? `${money(trip.budget, String(trip.currency || "USD"))} ${trip.currency || "USD"}`
+                      : "Budget not set"}{" "}
                     <ArrowRight className="ml-1 inline" size={13} />
                   </span>
                 </Link>
@@ -304,7 +392,7 @@ export default function Index() {
             The figures above come from your saved trips, recorded expenses, and
             per-trip checklist items.
           </p>
-          <div className="mt-4 flex gap-3 border-t border-[#dfe3d8] pt-3">
+          <div className="mt-4 flex flex-wrap gap-3 border-t border-[#dfe3d8] pt-3">
             <Link
               to="/budget"
               className="text-[10px] font-bold text-[#287064] hover:underline"
@@ -325,6 +413,57 @@ export default function Index() {
             </Link>
           </div>
         </div>
+      </section>
+      <section className="mb-8 rounded-2xl border border-[#e9e6de] bg-white/85 p-5 sm:p-6">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[.14em] text-[#96998e]">
+              RECENT SPENDING
+            </p>
+            <h2 className="mt-1 font-heading text-[18px] font-bold">
+              Latest expenses
+            </h2>
+          </div>
+          <Link to="/expenses" className="text-[10px] font-bold text-[#287064]">
+            All expenses →
+          </Link>
+        </div>
+        {recentExpenses.length ? (
+          <div className="divide-y divide-[#f0eee8]">
+            {recentExpenses.map((expense) => {
+              const trip = tripById.get(expenseTrip(expense));
+              const currency = trip
+                ? String(trip.currency || "USD")
+                : "Currency unknown";
+              return (
+                <div
+                  key={idOf(expense)}
+                  className="flex items-center justify-between gap-3 py-2.5"
+                >
+                  <div>
+                    <p className="text-[11px] font-bold">
+                      {expense.description}
+                    </p>
+                    <p className="mt-1 text-[9px] text-[#92958b]">
+                      {expense.category} ·{" "}
+                      {String(expense.date ?? "").slice(0, 10)}
+                      {trip ? ` · ${labelOf(trip)}` : " · Unassigned trip"}
+                    </p>
+                  </div>
+                  <b className="text-[11px]">
+                    {currency === "Currency unknown"
+                      ? `${Number(expense.amount).toLocaleString()} · currency unknown`
+                      : `${money(expense.amount, currency)} ${currency}`}
+                  </b>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-[11px] text-[#92958b]">
+            No expenses recorded yet.
+          </p>
+        )}
       </section>
       <section>
         <div className="mb-4 flex items-end justify-between">
